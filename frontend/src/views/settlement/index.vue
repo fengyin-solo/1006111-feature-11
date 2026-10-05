@@ -16,7 +16,55 @@
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
+      <article class="stat-card stat-alarm">
+        <span class="stat-label">监测报警点（取建筑监测台账）</span>
+        <strong class="stat-value">{{ alarmPoints.filter((point) => point.level === '报警').length }}</strong>
+      </article>
     </div>
+
+    <section class="alarm-panel">
+      <header class="panel-head">
+        <h3>报警清单</h3>
+        <span class="panel-note">
+          与建筑监测台账同一份取数，本页只读，无修改入口；口径冲突时以建筑监测台账为准。判定标准：{{ standard }}
+        </span>
+      </header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>测点位置</th>
+            <th>对象编号</th>
+            <th>权属单位</th>
+            <th>等级</th>
+            <th>实测沉降</th>
+            <th>允许沉降</th>
+            <th>超限幅度</th>
+            <th>判定标准</th>
+            <th>布点时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="point in alarmPoints" :key="point.objectNo" :class="{ 'row-alarm': point.level === '报警' }">
+            <td>{{ point.location }}</td>
+            <td>{{ point.objectNo }}</td>
+            <td>{{ point.ownerUnit }}</td>
+            <td>
+              <span class="level-tag" :class="point.level === '报警' ? 'level-alarm' : 'level-warn'">{{ point.level }}</span>
+            </td>
+            <td>{{ point.measuredMm }}mm</td>
+            <td>{{ point.allowMm }}mm</td>
+            <td :class="point.overMm > 0 ? 'text-alarm' : ''">
+              {{ point.level === '报警' ? `+${point.overMm}mm` : '未超限（预警）' }}
+            </td>
+            <td class="standard-cell">{{ point.standard }}</td>
+            <td>{{ point.deployDate || '—' }}</td>
+          </tr>
+          <tr v-if="!alarmPoints.length">
+            <td colspan="9" class="empty-state">暂无预警/报警点（以建筑监测台账取数为准）</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
@@ -64,7 +112,7 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条地表沉降记录</span>
+      <span>共 {{ total }} 条地表沉降记录；上方报警清单 {{ alarmPoints.length }} 条与建筑监测台账同源</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -79,19 +127,39 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { alarmStandard, listAlarmPoints } from '@/api/building-service'
+import type { AlarmPoint, EntryRow } from '@/data/types'
 
 const meta = moduleMeta('settlement')
 const columns = ["测点编号", "测点位置", "初始高程", "累计沉降", "沉降速率", "预警阈值", "监测日期", "测点状态"]
 const actions = ["提交监测", "发布预警", "确认稳定"]
 const statuses = ["正常", "预警", "报警", "已稳定"]
-const stats = [{"label": "正常测点", "value": 0}, {"label": "预警测点", "value": 0}, {"label": "最大累计沉降", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 报警清单：建筑监测台账的只读投影，两处点数同源。
+const alarmPoints = ref<AlarmPoint[]>([])
+const standard = alarmStandard()
+
+const stats = computed(() => [
+  { label: "正常测点", value: rows.value.filter((row) => String(row.status) === "正常").length },
+  { label: "预警测点", value: rows.value.filter((row) => String(row.status) === "预警").length },
+  { label: "最大累计沉降", value: maxSettlement() },
+])
+
+function maxSettlement(): string {
+  const values = rows.value
+    .map((row) => String(row["累计沉降"] ?? "").match(/-?\d+(\.\d+)?/))
+    .filter((matched): matched is RegExpMatchArray => matched !== null)
+    .map((matched) => Number(matched[0]))
+    .filter((value) => Number.isFinite(value))
+  return values.length ? `${Math.max(...values)}mm` : '—'
+}
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +196,8 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    // 与建筑监测页读同一份取数。
+    alarmPoints.value = listAlarmPoints()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '地表沉降列表读取失败'
   }
