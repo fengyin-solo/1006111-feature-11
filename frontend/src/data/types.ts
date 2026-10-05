@@ -36,3 +36,13 @@ export type OverviewResult = {
   cards: { label: string; value: number }[]
   modules: { name: string; created: number; pending: number; abnormal: number }[]
 }
+
+// 建筑监测领域服务返回：清单条数、报警点数都与地表沉降页同源。
+export type MonitoringViewResult = {
+  items: EntryRow[]
+  total: number
+  alarmCount: number
+  alarms: EntryRow[]
+  monitoringCount: number
+  pendingDeployCount: number
+}
